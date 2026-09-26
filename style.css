@@ -54,9 +54,15 @@
     margin: 6px 0;
 }
 
+/* 按钮不许被压缩：否则窄容器里会被挤成竖排文字（而不是换行） */
+.upf-row .menu_button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
 .upf-select {
-    flex: 0 1 180px;
-    min-width: 130px;
+    flex: 0 1 150px;
+    min-width: 0;
 }
 
 .upf-textarea {
@@ -86,13 +92,13 @@
 }
 
 .upf-input {
-    flex: 0 1 260px;
-    min-width: 180px;
+    flex: 0 1 240px;
+    min-width: 0;
 }
 
 .upf-input-short {
-    flex: 0 0 170px;
-    min-width: 150px;
+    flex: 0 1 130px;
+    min-width: 0;
 }
 
 .upf-subsection {
