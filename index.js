@@ -815,7 +815,7 @@ function buildPanelHtml() {
         <div class="inline-drawer">
             <div class="inline-drawer-toggle inline-drawer-header">
                 <b>User Persona Forge · 跨世界观 User 人设</b>
-                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+                <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
             </div>
             <div class="inline-drawer-content">
 

@@ -4,7 +4,7 @@
     "js": "index.js",
     "css": "style.css",
     "author": "unfallen-314",
-    "version": "2.2.4",
+    "version": "2.2.5",
     "auto_update": true,
     "minimum_client_version": "1.13.0",
     "hooks": {
