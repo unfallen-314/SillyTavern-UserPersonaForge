@@ -910,7 +910,7 @@ function buildPanelHtml() {
                 <div class="inline-drawer">
                     <div class="inline-drawer-toggle inline-drawer-header">
                         <b>身份档案库（手动管理 / 生成历史，可选）</b>
-                        <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                     </div>
                     <div class="inline-drawer-content" style="display:none">
                         <div class="upf-row">
@@ -934,7 +934,7 @@ function buildPanelHtml() {
                 <div class="inline-drawer">
                     <div class="inline-drawer-toggle inline-drawer-header">
                         <b>工具</b>
-                        <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                     </div>
                     <div class="inline-drawer-content" style="display:none">
                         <div class="upf-row">
