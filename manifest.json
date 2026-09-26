@@ -1,0 +1,13 @@
+{
+    "display_name": "User Persona Forge（跨世界观 User 人设）",
+    "loading_order": 100,
+    "js": "index.js",
+    "css": "style.css",
+    "author": "unfallen-314",
+    "version": "2.2.2",
+    "auto_update": true,
+    "minimum_client_version": "1.13.0",
+    "hooks": {
+        "activate": "onActivate"
+    }
+}
