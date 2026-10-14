@@ -74,6 +74,9 @@ const DEFAULT_SETTINGS = Object.freeze({
         maxWorldChars: 6000,
         maxEntries: 60,
         extraInstruction: '',
+        /** v2.3：自定义生成提示词（留空 = 用内置默认模板） */
+        userPromptTemplate: '',
+        npcPromptTemplate: '',
     },
     /** v2：注入记录 { [世界书名]: { uid, comment } } */
     injections: {},
@@ -324,34 +327,96 @@ const OUTPUT_TEMPLATE = [
     '■ 【称呼表】上位者→___ / 平辈→___ / 服务者→___',
 ].join('\n');
 
-function buildGeneratePrompt(coreText, requirement, worldContext, charName) {
+/* ------------------------------------------------------------------ */
+/* 提示词模板（v2.3：用户可自定义）                                     */
+/* ------------------------------------------------------------------ */
+
+const DEFAULT_USER_PROMPT = [
+    '你是一个资深 TRPG / 角色扮演设定助手。请为「玩家（User）」生成一份人物身份设定。',
+    '',
+    '【第一步：不可改变的核心性格】',
+    '{{CORE}}',
+    '',
+    '【第二步：目标世界观素材】',
+    '{{WORLD}}',
+    '',
+    '【第三步：用户的额外要求】',
+    '{{REQ}}',
+    '{{EXTRA}}',
+    '【生成规则】',
+    '1. 核心性格、说话腔调、底线、关系模式必须原样保留，绝对不许 OOC。只换身份外壳。',
+    '2. 把核心特质里的现代元素「翻译」成本世界观的等价物（例：写代码→研究炼金阵列/刷固件），禁止出现现代词汇。',
+    '3. 身份必须能与该世界观的主角自然产生交集，并给出具体的关系和初识方式。',
+    '4. 明确写出「在这个世界观下做不到的事」，这能防止模型后续乱编。',
+    '5. 只输出设定正文。不要任何开场白、解释、总结，不要用 markdown 代码块包裹。',
+    '',
+    '【输出格式（严格遵守，条目不增减）】',
+    '{{TEMPLATE}}',
+].join('\n');
+
+const DEFAULT_NPC_PROMPT = [
+    '你是一个资深 TRPG / 角色扮演设定助手。请为下面这个世界观生成一个配角 NPC。',
+    '',
+    '【世界观素材】',
+    '{{WORLD}}',
+    '',
+    '【用户的额外要求】',
+    '{{REQ}}',
+    '',
+    '【生成规则】',
+    '1. NPC 必须严格贴合该世界观，禁止出现现代词汇或与世界观冲突的设定。',
+    '2. NPC 要有自己的目的和秘密 —— 有目的才有戏，有秘密才有深度。',
+    '3. 与主角（{{CHAR}}）的关系要具体，不要写"认识"这种空话。',
+    '4. 触发关键词必须包含 NPC 的名字、称号，以及别人可能怎么称呼他 —— 这条会写进世界书，决定 NPC 什么时候出现。',
+    '5. 只输出设定正文。不要任何开场白、解释、总结，不要用 markdown 代码块包裹。',
+    '',
+    '【输出格式（严格遵守，条目不增减）】',
+    '{{TEMPLATE}}',
+].join('\n');
+
+/** 模板里的 {{VAR}} 占位符（单次扫描，替换结果不会被二次处理） */
+const PROMPT_VARS_DOC = {
+    CORE: '核心性格（你的 L0 内核）',
+    WORLD: '当前角色卡的世界观素材',
+    REQ: '你在面板里填的额外要求',
+    CHAR: '主角（角色卡）名字',
+    TEMPLATE: '输出格式（字段列表）',
+    EXTRA: '附加指令（面板里单独那一栏）',
+};
+
+/** 把 {{VAR}} 占位符替换成实际值；未定义的变量原样保留 */
+function applyPromptTemplate(tpl, vars) {
+    return String(tpl ?? '').replace(/\{\{(\w+)\}\}/g, (m, key) => {
+        const v = vars[key];
+        return v === undefined || v === null ? m : String(v);
+    });
+}
+
+/** 拼接两个 build 函数共用的变量表；coreText 传 undefined 表示不提供 {{CORE}} */
+function makePromptVars(coreText, requirement, worldContext, charName) {
     const s = getSettings();
     const req = String(requirement ?? '').trim();
+    const vars = {
+        WORLD: worldContext?.text || '（该角色卡没有世界书，请自行构想一个与角色卡相符的世界观）',
+        REQ: req || '（无要求。请自由发挥：创造一个能自然融入该世界观、并与主角有强烈戏剧张力的身份，不要写成路人甲。）',
+        EXTRA: s.gen.extraInstruction.trim() ? `【附加指令】\n${s.gen.extraInstruction.trim()}\n` : '',
+        CHAR: charName || '{{char}}',
+    };
+    if (coreText !== undefined) {
+        vars.CORE = String(coreText ?? '').trim() || '（用户未填写，请自行补全一个自洽的性格，并在最后注明你补全了什么）';
+    }
+    return vars;
+}
+
+function buildGeneratePrompt(coreText, requirement, worldContext, charName) {
+    const s = getSettings();
     const template = OUTPUT_TEMPLATE.replace(/__CHAR__/g, charName || '{{char}}');
 
-    return [
-        '你是一个资深 TRPG / 角色扮演设定助手。请为「玩家（User）」生成一份人物身份设定。',
-        '',
-        '【第一步：不可改变的核心性格】',
-        coreText.trim() || '（用户未填写，请自行补全一个自洽的性格，并在最后注明你补全了什么）',
-        '',
-        '【第二步：目标世界观素材】',
-        worldContext.text || '（该角色卡没有世界书，请自行构想一个与角色卡相符的世界观）',
-        '',
-        '【第三步：用户的额外要求】',
-        req || '（无要求。请自由发挥：创造一个能自然融入该世界观、并与主角有强烈戏剧张力的身份，不要写成路人甲。）',
-        '',
-        s.gen.extraInstruction.trim() ? `【附加指令】\n${s.gen.extraInstruction.trim()}\n` : '',
-        '【生成规则】',
-        '1. 核心性格、说话腔调、底线、关系模式必须原样保留，绝对不许 OOC。只换身份外壳。',
-        '2. 把核心特质里的现代元素「翻译」成本世界观的等价物（例：写代码→研究炼金阵列/刷固件），禁止出现现代词汇。',
-        '3. 身份必须能与该世界观的主角自然产生交集，并给出具体的关系和初识方式。',
-        '4. 明确写出「在这个世界观下做不到的事」，这能防止模型后续乱编。',
-        '5. 只输出设定正文。不要任何开场白、解释、总结，不要用 markdown 代码块包裹。',
-        '',
-        '【输出格式（严格遵守，条目不增减）】',
-        template,
-    ].filter(Boolean).join('\n');
+    const vars = makePromptVars(coreText, requirement, worldContext, charName);
+    vars.TEMPLATE = template;
+
+    const tpl = (s.gen.userPromptTemplate || '').trim() || DEFAULT_USER_PROMPT;
+    return applyPromptTemplate(tpl, vars);
 }
 
 /** 调用当前配置的模型生成身份 */
@@ -397,28 +462,14 @@ const NPC_OUTPUT_TEMPLATE = [
 ].join('\n');
 
 function buildNpcPrompt(requirement, worldContext, charName) {
-    const req = String(requirement ?? '').trim();
+    const s = getSettings();
     const template = NPC_OUTPUT_TEMPLATE.replace(/__CHAR__/g, charName || '{{char}}');
 
-    return [
-        '你是一个资深 TRPG / 角色扮演设定助手。请为下面这个世界观生成一个配角 NPC。',
-        '',
-        '【世界观素材】',
-        worldContext.text || '（该角色卡没有世界书，请自行构想一个相符的世界观）',
-        '',
-        '【用户的额外要求】',
-        req || '（无要求。请自由创造一个有戏剧张力的 NPC：有明确目的、有秘密、和主角有具体关系。不要写成无功能的路人甲。）',
-        '',
-        '【生成规则】',
-        '1. NPC 必须严格贴合该世界观，禁止出现现代词汇或与世界观冲突的设定。',
-        '2. NPC 要有自己的目的和秘密 —— 有目的才有戏，有秘密才有深度。',
-        `3. 与主角（${charName || '该世界观的主角'}）的关系要具体，不要写"认识"这种空话。`,
-        '4. 触发关键词必须包含 NPC 的名字、称号，以及别人可能怎么称呼他 —— 这条会写进世界书，决定 NPC 什么时候出现。',
-        '5. 只输出设定正文。不要任何开场白、解释、总结，不要用 markdown 代码块包裹。',
-        '',
-        '【输出格式（严格遵守，条目不增减）】',
-        template,
-    ].filter(Boolean).join('\n');
+    const vars = makePromptVars(undefined, requirement, worldContext, charName);   // NPC 不用 {{CORE}}
+    vars.TEMPLATE = template;
+
+    const tpl = (s.gen.npcPromptTemplate || '').trim() || DEFAULT_NPC_PROMPT;
+    return applyPromptTemplate(tpl, vars);
 }
 
 /** 从生成的 NPC 文本里提取名字和触发关键词 */
@@ -909,6 +960,43 @@ function buildPanelHtml() {
 
                 <div class="inline-drawer">
                     <div class="inline-drawer-toggle inline-drawer-header">
+                        <b>提示词模板（高级 · 可自定义）</b>
+                        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+                    </div>
+                    <div class="inline-drawer-content" style="display:none">
+                        <div class="upf-hint">
+                            这两个框就是发给模型的<strong>完整提示词</strong>，可以随意改。<br>
+                            可用占位符：<code>{{CORE}}</code> 核心性格 · <code>{{WORLD}}</code> 世界观素材 ·
+                            <code>{{REQ}}</code> 你的要求 · <code>{{CHAR}}</code> 主角名 ·
+                            <code>{{TEMPLATE}}</code> 输出格式 · <code>{{EXTRA}}</code> 附加指令<br>
+                            <strong>留空 = 用内置默认模板</strong>；改坏了点「重置」就恢复。想改又不想从头写，
+                            点「复制默认模板」拿一份再改最省事。
+                        </div>
+                        <div class="upf-subsection">
+                            <div class="upf-subsection-title">User 身份生成提示词</div>
+                            <textarea id="upf-user-tpl" class="upf-textarea text_pole" rows="16"
+                                placeholder="（留空则用内置默认模板）"></textarea>
+                            <div class="upf-row">
+                                <button id="upf-user-tpl-reset" class="menu_button">重置</button>
+                                <button id="upf-user-tpl-copy" class="menu_button">复制默认模板</button>
+                            </div>
+                        </div>
+                        <div class="upf-subsection">
+                            <div class="upf-subsection-title">NPC 生成提示词</div>
+                            <textarea id="upf-npc-tpl" class="upf-textarea text_pole" rows="14"
+                                placeholder="（留空则用内置默认模板；NPC 模板里没有 {{CORE}}）"></textarea>
+                            <div class="upf-row">
+                                <button id="upf-npc-tpl-reset" class="menu_button">重置</button>
+                                <button id="upf-npc-tpl-copy" class="menu_button">复制默认模板</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <hr class="sysHR">
+
+                <div class="inline-drawer">
+                    <div class="inline-drawer-toggle inline-drawer-header">
                         <b>身份档案库（手动管理 / 生成历史，可选）</b>
                         <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                     </div>
@@ -1090,6 +1178,8 @@ function refreshPanel() {
     const s = getSettings();
     $('#upf-core').val(s.core ?? '');
     updateCoreMeta();
+    $('#upf-user-tpl').val(s.gen.userPromptTemplate ?? '');
+    $('#upf-npc-tpl').val(s.gen.npcPromptTemplate ?? '');
     refreshIdentitySelect(null);
     refreshStatus();
 }
@@ -1298,6 +1388,58 @@ function bindEvents() {
         } catch (e) {
             console.error('[UPF] NPC 注入失败', e);
             toast(`注入失败：${e.message}`, 'error');
+        }
+    });
+
+    // ---- 提示词模板（v2.3）----
+    let tplTimerU = null, tplTimerN = null;
+
+    const saveTpl = (which) => {
+        const s = getSettings();
+        if (which === 'user') {
+            s.gen.userPromptTemplate = String($('#upf-user-tpl').val() ?? '');
+        } else {
+            s.gen.npcPromptTemplate = String($('#upf-npc-tpl').val() ?? '');
+        }
+        saveSettings();
+    };
+
+    $('#upf-user-tpl').on('input', () => {
+        clearTimeout(tplTimerU);
+        tplTimerU = setTimeout(() => saveTpl('user'), 600);
+    });
+    $('#upf-npc-tpl').on('input', () => {
+        clearTimeout(tplTimerN);
+        tplTimerN = setTimeout(() => saveTpl('npc'), 600);
+    });
+
+    $('#upf-user-tpl-reset').on('click', () => {
+        $('#upf-user-tpl').val('');
+        getSettings().gen.userPromptTemplate = '';
+        saveSettings();
+        toast('已重置（留空 = 用内置默认模板）', 'success');
+    });
+    $('#upf-npc-tpl-reset').on('click', () => {
+        $('#upf-npc-tpl').val('');
+        getSettings().gen.npcPromptTemplate = '';
+        saveSettings();
+        toast('已重置（留空 = 用内置默认模板）', 'success');
+    });
+
+    $('#upf-user-tpl-copy').on('click', async () => {
+        try {
+            await navigator.clipboard.writeText(DEFAULT_USER_PROMPT);
+            toast('默认模板已复制，粘到上面的框里改就行', 'success');
+        } catch (_) {
+            toast('复制失败，请手动复制', 'warning');
+        }
+    });
+    $('#upf-npc-tpl-copy').on('click', async () => {
+        try {
+            await navigator.clipboard.writeText(DEFAULT_NPC_PROMPT);
+            toast('默认模板已复制，粘到上面的框里改就行', 'success');
+        } catch (_) {
+            toast('复制失败，请手动复制', 'warning');
         }
     });
 
